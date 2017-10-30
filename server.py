@@ -41,6 +41,7 @@ def main():
     except (IndexError, ValueError):
         pass
 
+    # 注册为UDP Server
     sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sockfd.bind(("", port))
     print "listening on *:%d (udp)" % port
@@ -50,12 +51,19 @@ def main():
     # temp state {100:(nat_type_id, addr_A, addr_B)}
     # final state {addr_A:addr_B, addr_B:addr_A}
     symmetric_chat_clients = {}
+    # 创建有名元组，并且包含两个属性：addr、nat_type_id。
     ClientInfo = namedtuple("ClientInfo", "addr, nat_type_id")
     while True:
+        # 接收客户端发送过来的数据
         data, addr = sockfd.recvfrom(1024)
+        # def send_msg_symm(sock):
+        #     while True:
+        #         data = 'msg ' + sys.stdin.readline()
+        #         sock.sendto(data, self.master)
         if data.startswith("msg "):
             # forward symmetric chat msg, act as TURN server
             try:
+                # 截取实际数据，转发到客户端
                 sockfd.sendto(data[4:], symmetric_chat_clients[addr])
                 print("msg successfully forwarded to {0}".format(symmetric_chat_clients[addr]))
                 print(data[4:])
@@ -64,9 +72,15 @@ def main():
         else:
             # help build connection between clients, act as STUN server
             print "connection from %s:%d" % addr
+            # self.sockfd.sendto(self.pool + ' {0}'.format(nat_type_id), self.master)
             pool, nat_type_id = data.strip().split()
+            # data, addr = self.sockfd.recvfrom(len(self.pool) + 3)
+            # if data != "ok " + self.pool:
+            #     print(sys.stderr, "unable to request!")
+            #     sys.exit(1)
             sockfd.sendto("ok {0}".format(pool), addr)
             print("pool={0}, nat_type={1}, ok sent to client".format(pool, NATTYPE[int(nat_type_id)]))
+            # self.sockfd.sendto("ok", self.master)
             data, addr = sockfd.recvfrom(2)
             if data != "ok":
                 continue
@@ -81,8 +95,10 @@ def main():
                 print "linked", pool
                 del poolqueue[pool]
             except KeyError:
+                # 要注意第一次没有数据的时候，触发的是这里，这样就添加了数据了，往字典里添加内容
                 poolqueue[pool] = ClientInfo(addr, nat_type_id)
 
+            # 建立双向映射通道
             if pool in symmetric_chat_clients:
                 if nat_type_id == '3' or symmetric_chat_clients[pool][0] == '3':
                     # at least one is symmetric NAT

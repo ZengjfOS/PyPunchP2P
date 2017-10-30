@@ -10,6 +10,7 @@ from threading import Event, Thread
 
 import stun
 
+# 四种NAT加上一种未知的NAT，一共五种类型，并放在一个NATTYPE变量中
 FullCone = "Full Cone"  # 0
 RestrictNAT = "Restrict NAT"  # 1
 RestrictPortNAT = "Restrict Port NAT"  # 2
@@ -23,6 +24,7 @@ def bytes2addr(bytes):
     if len(bytes) != 8:
         raise ValueError("invalid bytes")
     host = socket.inet_ntoa(bytes[:4])
+    # H(unsigned short)(2 Bytes)
     port = struct.unpack("H", bytes[-4:-2])[
         0]  # unpack returns a tuple even if it contains exactly one item
     nat_type_id = struct.unpack("H", bytes[-2:])[0]
@@ -33,30 +35,41 @@ def bytes2addr(bytes):
 class Client():
     def __init__(self):
         try:
+            # 如果master IP是localhsot，那么设置IP为127.0.0.1，其他的就直接设置
             master_ip = '127.0.0.1' if sys.argv[
                 1] == 'localhost' else sys.argv[1]
+            # IP，Port绑定成元组
             self.master = (master_ip, int(sys.argv[2]))
+            # The var pool is used to match clients, you can choose any number you like but only clients with the same number will be linked by server.
             self.pool = sys.argv[3].strip()
+            # 初始化其他变量
             self.sockfd = self.target = None
             self.periodic_running = False
             self.peer_nat_type = None
+        # 如果出现异常，那就退出了
         except (IndexError, ValueError):
             print(sys.stderr, "usage: %s <host> <port> <pool>" % sys.argv[0])
             sys.exit(65)
 
     def request_for_connection(self, nat_type_id=0):
+        # UDP（SOCK_DGRAM）
         self.sockfd = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        # 发送一个pool变量+nat_typ_id给Server
         self.sockfd.sendto(self.pool + ' {0}'.format(nat_type_id), self.master)
+        # 接收返回的数据
         data, addr = self.sockfd.recvfrom(len(self.pool) + 3)
         if data != "ok " + self.pool:
             print(sys.stderr, "unable to request!")
             sys.exit(1)
+        # 发送ok给Server
         self.sockfd.sendto("ok", self.master)
+        # 重定向错误输出
         sys.stderr = sys.stdout
         print(sys.stderr,
               "request sent, waiting for partner in pool '%s'..." % self.pool)
-        data, addr = self.sockfd.recvfrom(8)
+        data, addr = self.sockfd.recvfrom(8) 
 
+        # 获取目标的IP、Port、nat_type_id
         self.target, peer_nat_type_id = bytes2addr(data)
         print(self.target, peer_nat_type_id)
         self.peer_nat_type = NATTYPE[peer_nat_type_id]
@@ -92,11 +105,13 @@ class Client():
 
     @staticmethod
     def start_working_threads(send, recv, event=None, *args, **kwargs):
+        # 创建发送线程
         ts = Thread(target=send, args=args, kwargs=kwargs)
         ts.setDaemon(True)
         ts.start()
         if event:
             event.wait()
+        # 创建接收线程
         tr = Thread(target=recv, args=args, kwargs=kwargs)
         tr.setDaemon(True)
         tr.start()
@@ -107,6 +122,7 @@ class Client():
 
     def chat_restrict(self):
         from threading import Timer
+        # 
         cancel_event = Event()
 
         def send(count):
@@ -128,12 +144,15 @@ class Client():
 
         def send_msg_symm(sock):
             while True:
+                # 从标准输入获取一行数据，发送到Server端
                 data = 'msg ' + sys.stdin.readline()
                 sock.sendto(data, self.master)
 
         def recv_msg_symm(sock):
             while True:
+                # 从socket中获取数据，在标准标输出端显示
                 data, addr = sock.recvfrom(1024)
+                # 地址要能对上才显示数据
                 if addr == self.master:
                     sys.stdout.write(data)
 
@@ -148,15 +167,18 @@ class Client():
         我的NAT设备才能识别对方为"我已经发过包的地址". 直到收到对方的包, periodic发送停止
         """
         if not test_nat_type:
+            # 这里是获取默认的nat type
             nat_type, _, _ = self.get_nat_type()
         else:
             nat_type = test_nat_type  # 假装正在测试某种类型的NAT
         try:
+            # 获取一个连接，获取IP、PORT、nat_type
             self.request_for_connection(nat_type_id=NATTYPE.index(nat_type))
         except ValueError:
             print("NAT type is %s" % nat_type)
             self.request_for_connection(nat_type_id=4)  # Unknown NAT
 
+        # 根据不同的类型，开启不同的聊天传输模式
         if nat_type == UnknownNAT or self.peer_nat_type == UnknownNAT:
             print("Symmetric chat mode")
             self.chat_symmetric()
@@ -233,10 +255,13 @@ class Client():
 
 
 if __name__ == "__main__":
+    # Client是一个Class类型，创建一个Client对象
     c = Client()
     try:
+        # 获取NAT类型
         test_nat_type = NATTYPE[int(sys.argv[4])]  # 输入数字0,1,2,3
     except IndexError:
         test_nat_type = None
 
+    # 运行对应的NAT类型
     c.main(test_nat_type)
